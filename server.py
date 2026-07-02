@@ -13,18 +13,51 @@ _SESSION_HEADERS = {"X-Session-ID": SESSION_ID}
 mcp = FastMCP("HOOPS AI MCP Server")
 
 
+def _checked(response: httpx.Response) -> httpx.Response:
+    """Raise RuntimeError with API detail message on non-2xx responses."""
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        if response.status_code == 503:
+            detail = f"[Server configuration error] {detail} — サーバーの設定を確認してください。"
+        raise RuntimeError(f"HTTP {response.status_code}: {detail}")
+    return response
+
+
+def _api_get(url: str, **kwargs) -> httpx.Response:
+    try:
+        return _checked(httpx.get(url, **kwargs))
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Network error: {e}") from e
+
+
+def _api_post(url: str, **kwargs) -> httpx.Response:
+    try:
+        return _checked(httpx.post(url, **kwargs))
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Network error: {e}") from e
+
+
+def _api_delete(url: str, **kwargs) -> httpx.Response:
+    try:
+        return _checked(httpx.delete(url, **kwargs))
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Network error: {e}") from e
+
+
 def _upload_file(cad_file_path: str) -> str:
     """Upload a local CAD file and return its file_id. Idempotent for the same file content."""
     source_path = Path(cad_file_path).expanduser().resolve()
     if not source_path.exists():
         raise FileNotFoundError(f"CAD file not found: {source_path}")
     with source_path.open("rb") as f:
-        response = httpx.post(
+        response = _api_post(
             f"{API_BASE}/files/upload",
             files={"file": (source_path.name, f, "application/octet-stream")},
             timeout=120,
         )
-    response.raise_for_status()
     return response.json()["file_id"]
 
 
@@ -59,12 +92,11 @@ def upload_cad_model(cad_file_path: str) -> dict:
     if not source_path.exists():
         raise FileNotFoundError(f"CAD file not found: {source_path}")
     with source_path.open("rb") as f:
-        response = httpx.post(
+        response = _api_post(
             f"{API_BASE}/files/upload",
             files={"file": (source_path.name, f, "application/octet-stream")},
             timeout=120,
         )
-    response.raise_for_status()
     return response.json()
 
 
@@ -84,13 +116,12 @@ def open_cad_viewer(cad_file_path: str = "", file_id: str = "") -> dict:
     - cad_file_path: local path to the CAD file (will be uploaded automatically)
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/CAD/viewer",
         params={"file_id": fid},
         headers=_SESSION_HEADERS,
         timeout=120,
     )
-    response.raise_for_status()
     data = response.json()
     viewer_url = data.get("viewer_url")
     if not viewer_url:
@@ -102,14 +133,14 @@ def open_cad_viewer(cad_file_path: str = "", file_id: str = "") -> dict:
 def get_MFR_table_of_contents():
     """Return a summary table of contents for the MFR dataset."""
 
-    response = httpx.get(f"{API_BASE}/MFR/dataset/table-of-contents")
+    response = _api_get(f"{API_BASE}/MFR/dataset/table-of-contents")
     return response.json()
 
 @mcp.tool()
 def get_MFR_labels_description():
     """Return MFR label IDs, feature names, and descriptions."""
 
-    response = httpx.get(f"{API_BASE}/MFR/labels/description")
+    response = _api_get(f"{API_BASE}/MFR/labels/description")
     return response.json()
 
 @mcp.tool()
@@ -125,7 +156,7 @@ def search_MFR_files(
     if feature_name:
         params["feature_name"] = feature_name
 
-    response = httpx.get(f"{API_BASE}/MFR/files/search", params=params)
+    response = _api_get(f"{API_BASE}/MFR/files/search", params=params)
     return response.json()
 
 
@@ -150,13 +181,12 @@ def run_MFR_inference(cad_file_path: str = "", file_id: str = "") -> dict:
     color_map contains only the labels present in the model: {label_id: {name, color_rgb}}.
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/MFR/inference",
         params={"file_id": fid},
         headers=_SESSION_HEADERS,
         timeout=300,
     )
-    response.raise_for_status()
     return response.json()
 
 
@@ -169,8 +199,7 @@ def terminate_CAD_viewer(terminate_all: bool = False) -> dict:
     Returns the number of viewers terminated.
     """
     params = {"all": "true"} if terminate_all else {}
-    response = httpx.delete(f"{API_BASE}/CAD/viewer", params=params, headers=_SESSION_HEADERS, timeout=30)
-    response.raise_for_status()
+    response = _api_delete(f"{API_BASE}/CAD/viewer", params=params, headers=_SESSION_HEADERS, timeout=30)
     return response.json()
 
 
@@ -185,12 +214,11 @@ def get_brep_adjacency_graph(cad_file_path: str = "", file_id: str = "") -> dict
     Returns graph data (nodes, edges, counts) and image_url: a URL to a PNG visualization.
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/BRep/adjacency-graph",
         params={"file_id": fid},
         timeout=120,
     )
-    response.raise_for_status()
     return response.json()
 
 
@@ -210,12 +238,11 @@ def get_brep_attributes(cad_file_path: str = "", file_id: str = "") -> dict:
     - edges: types, lengths, dihedrals, convexities, types_description
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/BRep/attributes",
         params={"file_id": fid},
         timeout=120,
     )
-    response.raise_for_status()
     return response.json()
 
 
@@ -234,12 +261,11 @@ def search_similar_shapes(cad_file_path: str = "", file_id: str = "", top_k: int
       <img src="data:image/png;base64,{image_base64}">
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/similarity/search",
         params={"file_id": fid, "top_k": top_k},
         timeout=300,
     )
-    response.raise_for_status()
     data = response.json()
 
     image_url = data.get("image_url", "")
@@ -272,8 +298,7 @@ def get_similar_search_index_info() -> dict:
     - embedding_dim: dimension of each embedding vector
     - metadata: auxiliary metadata stored in the index (e.g. failed_count), or null
     """
-    response = httpx.get(f"{API_BASE}/similarity/index-info", timeout=60)
-    response.raise_for_status()
+    response = _api_get(f"{API_BASE}/similarity/index-info", timeout=60)
     return response.json()
 
 
@@ -296,36 +321,32 @@ def run_part_classification_inference(
     Returns a ranked list of part classes with confidence scores (integer %).
     """
     fid = _resolve_file_id(cad_file_path, file_id)
-    response = httpx.post(
+    response = _api_post(
         f"{API_BASE}/part-classification/predict",
         params={"file_id": fid, "top_k": top_k},
         timeout=300,
     )
-    response.raise_for_status()
     return response.json()
 
 
 @mcp.tool()
 def get_part_classification_labels() -> dict:
     """Return the full 45-class part label dictionary with IDs and descriptions."""
-    response = httpx.get(f"{API_BASE}/part-classification/labels")
-    response.raise_for_status()
+    response = _api_get(f"{API_BASE}/part-classification/labels")
     return response.json()
 
 
 @mcp.tool()
 def get_part_classification_table_of_contents() -> dict:
     """Return a summary table of contents for the Part Classification dataset, including available groups."""
-    response = httpx.get(f"{API_BASE}/part-classification/dataset/table-of-contents")
-    response.raise_for_status()
+    response = _api_get(f"{API_BASE}/part-classification/dataset/table-of-contents")
     return response.json()
 
 
 @mcp.tool()
 def get_part_classification_label_distribution() -> dict:
     """Return per-class file count distribution across the Part Classification training dataset."""
-    response = httpx.get(f"{API_BASE}/part-classification/dataset/label-distribution")
-    response.raise_for_status()
+    response = _api_get(f"{API_BASE}/part-classification/dataset/label-distribution")
     return response.json()
 
 
@@ -335,11 +356,10 @@ def get_part_classification_files(label_id: int) -> dict:
 
     label_id: part label ID (0–44).
     """
-    response = httpx.get(
+    response = _api_get(
         f"{API_BASE}/part-classification/dataset/files",
         params={"label_id": label_id},
     )
-    response.raise_for_status()
     return response.json()
 
 
@@ -358,11 +378,10 @@ def get_part_classification_preview(
     Returns label_id, part_name, and image_url pointing to the PNG grid.
     The image can be embedded in HTML: <img src="{image_url}">
     """
-    response = httpx.get(
+    response = _api_get(
         f"{API_BASE}/part-classification/dataset/preview",
         params={"label_id": label_id, "k": k, "grid_cols": grid_cols},
     )
-    response.raise_for_status()
     return response.json()
 
 
