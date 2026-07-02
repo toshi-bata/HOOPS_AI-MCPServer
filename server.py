@@ -257,6 +257,26 @@ def get_similar_part_image(filename: str) -> str:
     return f"{API_BASE}/similarity/part-image?filename={filename}"
 
 
+@mcp.tool()
+def get_similar_search_index_info() -> dict:
+    """Return metadata about the FAISS similarity-search index loaded on the server.
+
+    This is a read-only endpoint — it never triggers index construction or retraining.
+
+    Returns:
+    - status: "loaded" or "not_loaded"
+    - index_path: absolute path to the FAISS index file
+    - index_last_modified: UTC last-modified timestamp of the index file
+    - index_count: number of embeddings stored in the index
+    - model_name: name of the embedding model used to build the index
+    - embedding_dim: dimension of each embedding vector
+    - metadata: auxiliary metadata stored in the index (e.g. failed_count), or null
+    """
+    response = httpx.get(f"{API_BASE}/similarity/index-info", timeout=60)
+    response.raise_for_status()
+    return response.json()
+
+
 # ── Part Classification ────────────────────────────────────────────────────────
 
 @mcp.tool()
