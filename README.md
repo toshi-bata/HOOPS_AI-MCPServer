@@ -88,22 +88,51 @@ Claude Desktop passes this value to the MCP server process automatically:
 
 ## Available MCP Tools
 
-Claude Desktop can call these 12 tools using natural language:
+Claude Desktop can call these 19 tools using natural language:
+
+### File Management
 
 | Tool | Description |
 |---|---|
 | `upload_cad_model` | Upload a local CAD file to the server. Returns `file_id`, `filename`, and `already_existed`. Pass `file_id` to other tools to avoid re-uploading. |
 | `open_cad_viewer` | Open a CAD file in the interactive 3D browser viewer. Returns `viewer_url` and `image_url` (PNG preview). |
 | `terminate_CAD_viewer` | Terminate the last active viewer, or all viewers (`terminate_all=True`). |
+
+### B-Rep Analysis
+
+| Tool | Description |
+|---|---|
 | `get_brep_adjacency_graph` | Build a face adjacency graph from a CAD file. Returns graph data (nodes, edges, counts) and `image_url` (PNG visualization URL). |
 | `get_brep_attributes` | Extract face and edge attributes (types, areas, lengths, dihedral angles, etc.) from a CAD file. |
-| `get_MFR_table_of_contents` | Get a summary of the Manufacturing Feature Recognition (MFR) dataset. |
+
+### Manufacturing Feature Recognition (MFR)
+
+| Tool | Description |
+|---|---|
+| `get_MFR_table_of_contents` | Get a summary of the MFR dataset. |
 | `get_MFR_labels_description` | List all MFR label IDs, feature names, and descriptions. |
 | `search_MFR_files` | Find CAD files in the MFR dataset that contain a given manufacturing feature. |
 | `get_MFR_file_thumbnail` | Return the URL of the thumbnail PNG for a given dataset file ID. |
-| `run_MFR_inference` | Run MFR inference on a CAD file. Launches the viewer and returns predictions, probabilities, `viewer_url`, and `image_url` (PNG preview). |
-| `search_similar_shapes` | Find the top-k most similar parts using HOOPS Embeddings and a FAISS index. Returns match IDs, similarity scores, and `image_url` (result grid image URL). |
+| `run_MFR_inference` | Run MFR inference on a CAD file. Returns predictions, probabilities, `viewer_url`, and `image_url`. |
+
+### Shape Similarity Search
+
+| Tool | Description |
+|---|---|
+| `search_similar_shapes` | Find the top-k most similar parts using HOOPS Embeddings and a FAISS index. Returns match IDs, similarity scores, and `image_url`. |
 | `get_similar_part_image` | Return the URL of the pre-generated PNG thumbnail for a part filename returned by `search_similar_shapes`. |
+| `get_similar_search_index_info` | Return metadata about the loaded FAISS index: status, entry count, embedding model name, vector dimension, file path, last-modified timestamp, and auxiliary metadata. Read-only. |
+
+### Part Classification
+
+| Tool | Description |
+|---|---|
+| `run_part_classification_inference` | Run Part Classification inference on a CAD file. Returns the top-k predicted part classes with confidence scores (1–45 classes). |
+| `get_part_classification_labels` | Return the full 45-class part label dictionary with IDs and descriptions. |
+| `get_part_classification_table_of_contents` | Get a summary of the Part Classification dataset including available groups. |
+| `get_part_classification_label_distribution` | Return per-class file count distribution across the Part Classification training dataset. |
+| `get_part_classification_files` | Return the list of file IDs in the dataset that belong to a given part class (`label_id` 0–44). |
+| `get_part_classification_preview` | Return a URL to a PNG thumbnail grid for a given part class (`label_id`, `k`, `grid_cols`). |
 
 ---
 
