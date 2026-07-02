@@ -257,5 +257,94 @@ def get_similar_part_image(filename: str) -> str:
     return f"{API_BASE}/similarity/part-image?filename={filename}"
 
 
+# ── Part Classification ────────────────────────────────────────────────────────
+
+@mcp.tool()
+def run_part_classification_inference(
+    cad_file_path: str = "",
+    file_id: str = "",
+    top_k: int = 5,
+) -> dict:
+    """Run Part Classification inference on a CAD file and return the top-k predicted classes.
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
+    - cad_file_path: local path to the CAD file (will be uploaded automatically)
+
+    top_k: number of top predictions to return (1–45, default 5).
+
+    Returns a ranked list of part classes with confidence scores (integer %).
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = httpx.post(
+        f"{API_BASE}/part-classification/predict",
+        params={"file_id": fid, "top_k": top_k},
+        timeout=300,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+def get_part_classification_labels() -> dict:
+    """Return the full 45-class part label dictionary with IDs and descriptions."""
+    response = httpx.get(f"{API_BASE}/part-classification/labels")
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+def get_part_classification_table_of_contents() -> dict:
+    """Return a summary table of contents for the Part Classification dataset, including available groups."""
+    response = httpx.get(f"{API_BASE}/part-classification/dataset/table-of-contents")
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+def get_part_classification_label_distribution() -> dict:
+    """Return per-class file count distribution across the Part Classification training dataset."""
+    response = httpx.get(f"{API_BASE}/part-classification/dataset/label-distribution")
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+def get_part_classification_files(label_id: int) -> dict:
+    """Return the list of file IDs in the dataset that belong to a given part class.
+
+    label_id: part label ID (0–44).
+    """
+    response = httpx.get(
+        f"{API_BASE}/part-classification/dataset/files",
+        params={"label_id": label_id},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+def get_part_classification_preview(
+    label_id: int,
+    k: int = 25,
+    grid_cols: int = 8,
+) -> dict:
+    """Return a URL to a PNG thumbnail grid for a given part class.
+
+    label_id: part label ID (0–44).
+    k: max number of thumbnails to show (default 25).
+    grid_cols: number of columns in the thumbnail grid (default 8).
+
+    Returns label_id, part_name, and image_url pointing to the PNG grid.
+    The image can be embedded in HTML: <img src="{image_url}">
+    """
+    response = httpx.get(
+        f"{API_BASE}/part-classification/dataset/preview",
+        params={"label_id": label_id, "k": k, "grid_cols": grid_cols},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
