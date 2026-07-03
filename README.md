@@ -88,7 +88,7 @@ Claude Desktop passes this value to the MCP server process automatically:
 
 ## Available MCP Tools
 
-Claude Desktop can call these 19 tools using natural language:
+Claude Desktop can call these 21 tools using natural language:
 
 ### File Management
 
@@ -122,6 +122,8 @@ Claude Desktop can call these 19 tools using natural language:
 | `search_similar_shapes` | Find the top-k most similar parts using HOOPS Embeddings and a FAISS index. Returns match IDs, similarity scores, and `image_url`. |
 | `get_similar_part_image` | Return the URL of the pre-generated PNG thumbnail for a part filename returned by `search_similar_shapes`. |
 | `get_similar_search_index_info` | Return metadata about the loaded FAISS index: status, entry count, embedding model name, vector dimension, file path, last-modified timestamp, and auxiliary metadata. Read-only. |
+| `embed_cad_shape` | Compute the shape embedding for a single CAD part (no FAISS index or training required). Returns `file_id`, `filename`, `dim`, `model_name`, `num_bodies`, and `cached`. Embeddings are cached server-side for fast repeated calls. |
+| `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP file in any combination. |
 
 ### Part Classification
 
@@ -162,4 +164,21 @@ Tell me about the manufacturing feature recognition dataset.
 
 ```
 "C:\temp\idler_sprocket.step" — search for similar parts to this component.
+```
+
+```
+この2つのSTEPファイルはどれくらい似ている？ C:\temp\partA.stp と C:\temp\partB.stp
+```
+
+```
+Compare these three parts and tell me which two are most similar:
+C:\temp\bracket_v1.step, C:\temp\bracket_v2.step, C:\temp\bracket_v3.step
+```
+
+```
+ZIPに入っているCADファイルの類似度マトリクスを出して。ファイルは C:\temp\parts.zip
+```
+
+```
+Compute the shape embedding for C:\temp\flange.stp and tell me the embedding dimension and model name.
 ```

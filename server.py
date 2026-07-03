@@ -302,6 +302,104 @@ def get_similar_search_index_info() -> dict:
     return response.json()
 
 
+@mcp.tool()
+def embed_cad_shape(cad_file_path: str = "", file_id: str = "", include_vector: bool = False) -> dict:
+    """Compute the shape embedding vector for a single CAD part and return its metadata.
+
+    No FAISS index or pre-training work is required — the server uses a bundled
+    pre-trained model and runs immediately.
+
+    Embeddings are cached server-side by file_id; a second call for the same file
+    returns instantly from the cache (cached=true in the response).
+
+    Leave include_vector as False (the default). The raw embedding vector is large
+    and not needed for most workflows — omitting it saves context.
+    To compare shapes against each other, use compare_cad_shapes instead.
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
+    - cad_file_path: local path to the CAD file (will be uploaded automatically)
+
+    Returns file_id, filename, dim, model_name, num_bodies, cached,
+    and vector (only when include_vector=True).
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/embed",
+        params={"file_id": fid, "include_vector": include_vector},
+        timeout=300,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def compare_cad_shapes(
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Compute pairwise cosine-similarity scores for two or more CAD parts.
+
+    Returns an N×N similarity matrix (1.0 = identical shape, higher = more similar)
+    and a ranked list of pairs sorted by score descending.
+
+    No FAISS index or pre-training work is required — the server uses a bundled
+    pre-trained model and runs immediately.
+
+    Inputs can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a local ZIP containing CAD files (extracted server-side,
+      max 50 files / 500 MB per ZIP); when specified alone, the server determines
+      the file count so the 2-part minimum check is skipped
+
+    At least two parts are required in total across cad_file_paths and file_ids
+    (unless zip_file_path is the sole input).
+
+    Response fields:
+    - count: total number of parts processed
+    - model_name: embedding model used
+    - files: list of {index, file_id, filename, num_bodies}
+    - matrix: N×N cosine-similarity matrix ordered by files[].index
+    - pairs: all unique pairs sorted by score descending
+    - errors: per-file failures, if any (overall request still succeeds)
+
+    Example natural-language prompts:
+    - "この2つのSTEPファイルはどれくらい似ている？"
+    - "Compare these three parts and tell me which two are most similar."
+    - "ZIPに入っているCADファイルの類似度マトリクスを出して。"
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    if not zip_file_path and len(resolved_ids) < 2:
+        raise ValueError(
+            "At least two parts are required for shape comparison. "
+            "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
+        )
+
+    params: dict = {}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+
+    response = _api_post(
+        f"{API_BASE}/similarity/compare",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
 # ── Part Classification ────────────────────────────────────────────────────────
 
 @mcp.tool()
