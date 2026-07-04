@@ -389,7 +389,8 @@ def compare_cad_shapes(
         zip_path = Path(zip_file_path).expanduser().resolve()
         if not zip_path.exists():
             raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
 
     response = _api_post(
         f"{API_BASE}/similarity/compare",
@@ -570,7 +571,8 @@ def add_to_similarity_index(
         zip_path = Path(zip_file_path).expanduser().resolve()
         if not zip_path.exists():
             raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
 
     if not resolved_ids and not zip_file_path:
         raise ValueError(
@@ -717,7 +719,8 @@ def generate_shape_space_map(
         zip_path = Path(zip_file_path).expanduser().resolve()
         if not zip_path.exists():
             raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
 
     response = _api_post(
         f"{API_BASE}/similarity/map",
