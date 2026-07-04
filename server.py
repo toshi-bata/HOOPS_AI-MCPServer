@@ -483,5 +483,184 @@ def get_part_classification_preview(
     return response.json()
 
 
+# ── Named Index Management ─────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def create_similarity_index(name: str) -> dict:
+    """Create a new empty named similarity index on the server.
+
+    The index starts with zero parts and grows as you call add_to_similarity_index.
+    Once created, it persists on the server until explicitly deleted — server
+    restarts do NOT clear it.
+
+    name: index name matching ^[a-z0-9_-]{1,64}$.  'default' is reserved.
+
+    Returns name, count (0), and dim (embedding dimension).
+
+    Raises an error if the name already exists (409) or is invalid (422).
+
+    Typical workflow:
+      1. create_similarity_index("my-parts")
+      2. add_to_similarity_index("my-parts", cad_file_paths=[...])
+      3. search_similarity_index("my-parts", cad_file_path="query.step")
+    """
+    response = _api_post(
+        f"{API_BASE}/similarity/index/create",
+        params={"name": name},
+        timeout=60,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def list_similarity_indexes() -> list:
+    """List all similarity indexes available on the server.
+
+    Always includes the built-in 'default' index (is_readonly=true) backed by
+    the pre-trained FabWave dataset, plus any user-created named indexes.
+
+    Each entry contains:
+    - name: index identifier
+    - count: number of registered parts (null if unreadable)
+    - last_modified: UTC timestamp of last change
+    - is_readonly: true only for the built-in 'default' index
+
+    Use this to check what indexes exist before calling other index tools.
+    """
+    response = _api_get(f"{API_BASE}/similarity/index/list", timeout=60)
+    return response.json()
+
+
+@mcp.tool()
+def add_to_similarity_index(
+    name: str,
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Register CAD parts in a named similarity index.
+
+    Embeddings are computed server-side and cached — re-adding the same file is fast.
+    Re-registering an existing part ID overwrites the old entry (no duplicates).
+    A PNG thumbnail is generated automatically for each registered part and stored
+    with the index (used in search result grids).
+
+    name: target index name (must already exist — call create_similarity_index first).
+
+    Input sources can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a ZIP archive containing CAD files (auto-extracted,
+      max 50 files / 500 MB)
+
+    Returns added (new parts), updated (overwritten parts), index_count (total after
+    this call), and errors (per-file failures that did not abort the request).
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    params: dict = {"name": name}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+
+    if not resolved_ids and not zip_file_path:
+        raise ValueError(
+            "At least one input is required: cad_file_paths, file_ids, or zip_file_path."
+        )
+
+    response = _api_post(
+        f"{API_BASE}/similarity/index/add",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def search_similarity_index(
+    name: str,
+    cad_file_path: str = "",
+    file_id: str = "",
+    top_k: int = 10,
+) -> dict:
+    """Search a named similarity index for the most similar parts to a query shape.
+
+    Returns an empty hits list (not an error) when the index contains zero entries.
+    When hits are found, image_url points to a result-grid PNG showing the query
+    part and the top-k matches with their similarity scores.
+
+    name: index name to search (use list_similarity_indexes to see available names).
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended)
+    - cad_file_path: local path to the CAD file (uploaded automatically)
+
+    Each hit contains:
+    - id: file_id of the registered part
+    - score: cosine similarity (1.0 = identical, higher = more similar)
+    - metadata: filename, registered_at timestamp
+
+    Also returns image_url: a URL to a PNG result-grid image.
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/index/{name}/search",
+        params={"file_id": fid, "top_k": top_k},
+        timeout=300,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def remove_from_similarity_index(name: str, part_ids: list[str]) -> dict:
+    """Remove specific registered parts from a named similarity index.
+
+    name: target index name.
+    part_ids: list of file_ids (SHA-256 hashes) to remove.
+              Use the id field from search_similarity_index hits.
+
+    Returns removed (count of IDs submitted) and index_count (total parts remaining).
+    Note: no error is raised for IDs that do not exist in the index.
+    """
+    if not part_ids:
+        raise ValueError("part_ids must not be empty.")
+    response = _api_delete(
+        f"{API_BASE}/similarity/index/{name}/parts",
+        params={"part_ids": ",".join(part_ids)},
+        timeout=60,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def delete_similarity_index(name: str) -> dict:
+    """Permanently delete a named similarity index and all its stored data.
+
+    This is irreversible — the FAISS index files and all generated thumbnails
+    are removed from disk.  The built-in 'default' index cannot be deleted.
+
+    name: index name to delete.
+
+    Returns name and deleted=true on success.
+    Raises an error if the index does not exist (404) or name is 'default' (403).
+    """
+    response = _api_delete(
+        f"{API_BASE}/similarity/index/{name}",
+        params={"confirm": "true"},
+        timeout=60,
+    )
+    return response.json()
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
