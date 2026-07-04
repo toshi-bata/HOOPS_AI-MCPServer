@@ -728,5 +728,49 @@ def generate_shape_space_map(
     return response.json()
 
 
+@mcp.tool()
+def query_shape_space_map(
+    map_id: str,
+    cad_file_path: str = "",
+    file_id: str = "",
+    persist: bool = False,
+) -> dict:
+    """Overlay a query CAD part on an existing Shape Space Map and highlight it in magenta.
+
+    The query part is embedded with the same pipeline used to build the map and
+    projected into the existing 3D coordinate space (out-of-sample MDS extension)
+    so it appears near its most similar parts.  A new overlay map is created and
+    the query part is rendered in magenta so it is clearly distinguishable from
+    the original parts.
+
+    Parameters:
+    - map_id: the map_id returned by a previous generate_shape_space_map() call
+    - cad_file_path: local path to the query CAD file (uploaded automatically)
+    - file_id: file_id from a previous upload_cad_model() call (alternative to cad_file_path)
+    - persist: when True, permanently add the query part to the original map (default False)
+
+    Response fields:
+    - overlay_map_id: ID of the new temporary overlay map
+    - viewer_url: URL to open the overlay in a browser (query part shown in magenta)
+    - query_part: metadata and 3D position of the query part
+    - nearest_parts: top-5 most similar existing parts sorted by cosine similarity score
+    - persisted: True when persist=True was used and the query is now in the original map
+    - errors: any non-fatal failures (e.g. SCS conversion)
+
+    Example natural-language prompts:
+    - "このSTEPファイルをマップ d2a7f205 にオーバーレイして類似パーツを確認して"
+    - "Highlight Sprocket.step in the existing shape map and show me the nearest parts."
+    - "Query the shape map with this part and persist it into the map."
+    """
+    resolved_id = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/map/{map_id}/query",
+        params={"file_id": resolved_id, "persist": str(persist).lower()},
+        timeout=300,
+    )
+    return response.json()
+
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
