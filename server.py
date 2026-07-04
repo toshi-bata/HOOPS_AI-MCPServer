@@ -662,5 +662,71 @@ def delete_similarity_index(name: str) -> dict:
     return response.json()
 
 
+@mcp.tool()
+def generate_shape_space_map(
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Generate a 3D Shape Space Map that visualizes similarity relationships between CAD parts.
+
+    Parts are positioned in 3D space using classical Multidimensional Scaling (MDS)
+    so that similar parts appear close together and dissimilar parts appear far apart.
+    Similar parts naturally form visible clusters in the viewer.
+
+    Inputs can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a local ZIP containing CAD files (extracted server-side,
+      max 50 files / 500 MB per ZIP)
+
+    At least two parts are required (unless zip_file_path is the sole input).
+
+    Response fields:
+    - map_id: unique ID for this map session
+    - viewer_url: URL to open the interactive 3D viewer in a browser
+    - count: number of parts processed
+    - parts: list of {index, file_id, filename, scs_url, position} where position is
+      the MDS-derived [x, y, z] coordinate (unit scale; viewer slider controls spacing)
+    - matrix: N×N cosine-similarity matrix ordered by parts[].index
+    - stress: MDS residual (0.0 = exact placement, >0 = approximate; N>=5 is always approximate)
+    - errors: per-file failures, if any
+
+    Example natural-language prompts:
+    - "この5つのSTEPファイルの形状空間マップを生成して"
+    - "Show me a 3D map of how similar these CAD parts are to each other."
+    - "Generate a shape space map from the ZIP file and open it in the viewer."
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    if not zip_file_path and len(resolved_ids) < 2:
+        raise ValueError(
+            "At least two parts are required for shape space map. "
+            "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
+        )
+
+    params: dict = {}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        files = {"zip_file": (zip_path.name, zip_path.open("rb"), "application/zip")}
+
+    response = _api_post(
+        f"{API_BASE}/similarity/map",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
