@@ -302,6 +302,105 @@ def get_similar_search_index_info() -> dict:
     return response.json()
 
 
+@mcp.tool()
+def embed_cad_shape(cad_file_path: str = "", file_id: str = "", include_vector: bool = False) -> dict:
+    """Compute the shape embedding vector for a single CAD part and return its metadata.
+
+    No FAISS index or pre-training work is required — the server uses a bundled
+    pre-trained model and runs immediately.
+
+    Embeddings are cached server-side by file_id; a second call for the same file
+    returns instantly from the cache (cached=true in the response).
+
+    Leave include_vector as False (the default). The raw embedding vector is large
+    and not needed for most workflows — omitting it saves context.
+    To compare shapes against each other, use compare_cad_shapes instead.
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
+    - cad_file_path: local path to the CAD file (will be uploaded automatically)
+
+    Returns file_id, filename, dim, model_name, num_bodies, cached,
+    and vector (only when include_vector=True).
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/embed",
+        params={"file_id": fid, "include_vector": include_vector},
+        timeout=300,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def compare_cad_shapes(
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Compute pairwise cosine-similarity scores for two or more CAD parts.
+
+    Returns an N×N similarity matrix (1.0 = identical shape, higher = more similar)
+    and a ranked list of pairs sorted by score descending.
+
+    No FAISS index or pre-training work is required — the server uses a bundled
+    pre-trained model and runs immediately.
+
+    Inputs can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a local ZIP containing CAD files (extracted server-side,
+      max 50 files / 500 MB per ZIP); when specified alone, the server determines
+      the file count so the 2-part minimum check is skipped
+
+    At least two parts are required in total across cad_file_paths and file_ids
+    (unless zip_file_path is the sole input).
+
+    Response fields:
+    - count: total number of parts processed
+    - model_name: embedding model used
+    - files: list of {index, file_id, filename, num_bodies}
+    - matrix: N×N cosine-similarity matrix ordered by files[].index
+    - pairs: all unique pairs sorted by score descending
+    - errors: per-file failures, if any (overall request still succeeds)
+
+    Example natural-language prompts:
+    - "この2つのSTEPファイルはどれくらい似ている？"
+    - "Compare these three parts and tell me which two are most similar."
+    - "ZIPに入っているCADファイルの類似度マトリクスを出して。"
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    if not zip_file_path and len(resolved_ids) < 2:
+        raise ValueError(
+            "At least two parts are required for shape comparison. "
+            "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
+        )
+
+    params: dict = {}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
+
+    response = _api_post(
+        f"{API_BASE}/similarity/compare",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
 # ── Part Classification ────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -383,6 +482,297 @@ def get_part_classification_preview(
         params={"label_id": label_id, "k": k, "grid_cols": grid_cols},
     )
     return response.json()
+
+
+# ── Named Index Management ─────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def create_similarity_index(name: str) -> dict:
+    """Create a new empty named similarity index on the server.
+
+    The index starts with zero parts and grows as you call add_to_similarity_index.
+    Once created, it persists on the server until explicitly deleted — server
+    restarts do NOT clear it.
+
+    name: index name matching ^[a-z0-9_-]{1,64}$.  'default' is reserved.
+
+    Returns name, count (0), and dim (embedding dimension).
+
+    Raises an error if the name already exists (409) or is invalid (422).
+
+    Typical workflow:
+      1. create_similarity_index("my-parts")
+      2. add_to_similarity_index("my-parts", cad_file_paths=[...])
+      3. search_similarity_index("my-parts", cad_file_path="query.step")
+    """
+    response = _api_post(
+        f"{API_BASE}/similarity/index/create",
+        params={"name": name},
+        timeout=60,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def list_similarity_indexes() -> list:
+    """List all similarity indexes available on the server.
+
+    Always includes the built-in 'default' index (is_readonly=true) backed by
+    the pre-trained FabWave dataset, plus any user-created named indexes.
+
+    Each entry contains:
+    - name: index identifier
+    - count: number of registered parts (null if unreadable)
+    - last_modified: UTC timestamp of last change
+    - is_readonly: true only for the built-in 'default' index
+
+    Use this to check what indexes exist before calling other index tools.
+    """
+    response = _api_get(f"{API_BASE}/similarity/index/list", timeout=60)
+    return response.json()
+
+
+@mcp.tool()
+def add_to_similarity_index(
+    name: str,
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Register CAD parts in a named similarity index.
+
+    Embeddings are computed server-side and cached — re-adding the same file is fast.
+    Re-registering an existing part ID overwrites the old entry (no duplicates).
+    A PNG thumbnail is generated automatically for each registered part and stored
+    with the index (used in search result grids).
+
+    name: target index name (must already exist — call create_similarity_index first).
+
+    Input sources can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a ZIP archive containing CAD files (auto-extracted,
+      max 50 files / 500 MB)
+
+    Returns added (new parts), updated (overwritten parts), index_count (total after
+    this call), and errors (per-file failures that did not abort the request).
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    params: dict = {"name": name}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
+
+    if not resolved_ids and not zip_file_path:
+        raise ValueError(
+            "At least one input is required: cad_file_paths, file_ids, or zip_file_path."
+        )
+
+    response = _api_post(
+        f"{API_BASE}/similarity/index/add",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def search_similarity_index(
+    name: str,
+    cad_file_path: str = "",
+    file_id: str = "",
+    top_k: int = 10,
+) -> dict:
+    """Search a named similarity index for the most similar parts to a query shape.
+
+    Returns an empty hits list (not an error) when the index contains zero entries.
+    When hits are found, image_url points to a result-grid PNG showing the query
+    part and the top-k matches with their similarity scores.
+
+    name: index name to search (use list_similarity_indexes to see available names).
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended)
+    - cad_file_path: local path to the CAD file (uploaded automatically)
+
+    Each hit contains:
+    - id: file_id of the registered part
+    - score: cosine similarity (1.0 = identical, higher = more similar)
+    - metadata: filename, registered_at timestamp
+
+    Also returns image_url: a URL to a PNG result-grid image.
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/index/{name}/search",
+        params={"file_id": fid, "top_k": top_k},
+        timeout=300,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def remove_from_similarity_index(name: str, part_ids: list[str]) -> dict:
+    """Remove specific registered parts from a named similarity index.
+
+    name: target index name.
+    part_ids: list of file_ids (SHA-256 hashes) to remove.
+              Use the id field from search_similarity_index hits.
+
+    Returns removed (count of IDs submitted) and index_count (total parts remaining).
+    Note: no error is raised for IDs that do not exist in the index.
+    """
+    if not part_ids:
+        raise ValueError("part_ids must not be empty.")
+    response = _api_delete(
+        f"{API_BASE}/similarity/index/{name}/parts",
+        params={"part_ids": ",".join(part_ids)},
+        timeout=60,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def delete_similarity_index(name: str) -> dict:
+    """Permanently delete a named similarity index and all its stored data.
+
+    This is irreversible — the FAISS index files and all generated thumbnails
+    are removed from disk.  The built-in 'default' index cannot be deleted.
+
+    name: index name to delete.
+
+    Returns name and deleted=true on success.
+    Raises an error if the index does not exist (404) or name is 'default' (403).
+    """
+    response = _api_delete(
+        f"{API_BASE}/similarity/index/{name}",
+        params={"confirm": "true"},
+        timeout=60,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def generate_shape_space_map(
+    cad_file_paths: list[str] | None = None,
+    file_ids: list[str] | None = None,
+    zip_file_path: str = "",
+) -> dict:
+    """Generate a 3D Shape Space Map that visualizes similarity relationships between CAD parts.
+
+    Parts are positioned in 3D space using classical Multidimensional Scaling (MDS)
+    so that similar parts appear close together and dissimilar parts appear far apart.
+    Similar parts naturally form visible clusters in the viewer.
+
+    Inputs can be combined freely:
+    - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
+    - file_ids: list of existing file IDs from a previous upload_cad_model() call
+    - zip_file_path: path to a local ZIP containing CAD files (extracted server-side,
+      max 50 files / 500 MB per ZIP)
+
+    At least two parts are required (unless zip_file_path is the sole input).
+
+    Response fields:
+    - map_id: unique ID for this map session
+    - viewer_url: URL to open the interactive 3D viewer in a browser
+    - count: number of parts processed
+    - parts: list of {index, file_id, filename, scs_url, position} where position is
+      the MDS-derived [x, y, z] coordinate (unit scale; viewer slider controls spacing)
+    - matrix: N×N cosine-similarity matrix ordered by parts[].index
+    - stress: MDS residual (0.0 = exact placement, >0 = approximate; N>=5 is always approximate)
+    - errors: per-file failures, if any
+
+    Example natural-language prompts:
+    - "この5つのSTEPファイルの形状空間マップを生成して"
+    - "Show me a 3D map of how similar these CAD parts are to each other."
+    - "Generate a shape space map from the ZIP file and open it in the viewer."
+    """
+    resolved_ids: list[str] = list(file_ids) if file_ids else []
+
+    for path in (cad_file_paths or []):
+        resolved_ids.append(_upload_file(path))
+
+    if not zip_file_path and len(resolved_ids) < 2:
+        raise ValueError(
+            "At least two parts are required for shape space map. "
+            "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
+        )
+
+    params: dict = {}
+    if resolved_ids:
+        params["file_ids"] = ",".join(resolved_ids)
+
+    files: dict | None = None
+    if zip_file_path:
+        zip_path = Path(zip_file_path).expanduser().resolve()
+        if not zip_path.exists():
+            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+        with zip_path.open("rb") as zf:
+            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
+
+    response = _api_post(
+        f"{API_BASE}/similarity/map",
+        params=params,
+        files=files,
+        timeout=600,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def query_shape_space_map(
+    map_id: str,
+    cad_file_path: str = "",
+    file_id: str = "",
+    persist: bool = False,
+) -> dict:
+    """Overlay a query CAD part on an existing Shape Space Map and highlight it in magenta.
+
+    The query part is embedded with the same pipeline used to build the map and
+    projected into the existing 3D coordinate space (out-of-sample MDS extension)
+    so it appears near its most similar parts.  A new overlay map is created and
+    the query part is rendered in magenta so it is clearly distinguishable from
+    the original parts.
+
+    Parameters:
+    - map_id: the map_id returned by a previous generate_shape_space_map() call
+    - cad_file_path: local path to the query CAD file (uploaded automatically)
+    - file_id: file_id from a previous upload_cad_model() call (alternative to cad_file_path)
+    - persist: when True, permanently add the query part to the original map (default False)
+
+    Response fields:
+    - overlay_map_id: ID of the new temporary overlay map
+    - viewer_url: URL to open the overlay in a browser (query part shown in magenta)
+    - query_part: metadata and 3D position of the query part
+    - nearest_parts: top-5 most similar existing parts sorted by cosine similarity score
+    - persisted: True when persist=True was used and the query is now in the original map
+    - errors: any non-fatal failures (e.g. SCS conversion)
+
+    Example natural-language prompts:
+    - "このSTEPファイルをマップ d2a7f205 にオーバーレイして類似パーツを確認して"
+    - "Highlight Sprocket.step in the existing shape map and show me the nearest parts."
+    - "Query the shape map with this part and persist it into the map."
+    """
+    resolved_id = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/map/{map_id}/query",
+        params={"file_id": resolved_id, "persist": str(persist).lower()},
+        timeout=300,
+    )
+    return response.json()
+
 
 
 if __name__ == "__main__":
