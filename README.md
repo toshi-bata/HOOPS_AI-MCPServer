@@ -84,6 +84,17 @@ Claude Desktop passes this value to the MCP server process automatically:
 
 4. Save the file and **restart Claude Desktop**.
 
+### (Optional) Import the Skill file
+
+The `skills/` folder contains a `.skill` file that defines the expected behaviors and best-practice instructions for using this MCP server with Claude Desktop.  
+Importing it gives Claude a consistent baseline for how to invoke the HOOPS AI tools — you can then customize the skill to match your own workflow.
+
+**How to import:**
+
+1. In Claude Desktop, go to **Settings** → **Skills**
+2. Click **Import Skill** and select `skills/hoops-ai-tool-tips.skill` from this repository
+3. Review and edit the skill content as needed for your use case
+
 ---
 
 ## Available MCP Tools
