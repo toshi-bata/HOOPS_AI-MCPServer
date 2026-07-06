@@ -303,6 +303,47 @@ def get_similar_search_index_info() -> dict:
 
 
 @mcp.tool()
+def get_embedding_settings() -> dict:
+    """Return the server-wide active embedding model.
+
+    Returns a dict with key 'model': 'signal' (HOOPS AI SIGNAL model, default) or
+    'default' (1M model).
+
+    All subsequent compare_cad_shapes, generate_shape_space_map, and
+    create_similarity_index calls use this model.
+    """
+    response = _api_get(f"{API_BASE}/similarity/settings", timeout=30)
+    return response.json()
+
+
+@mcp.tool()
+def set_embedding_model(model: str) -> dict:
+    """Set the server-wide active embedding model.
+
+    model: 'signal' (HOOPS AI SIGNAL model, higher accuracy — default)
+           'default' (1M model set by HOOPS_AI_EMBEDDINGS_MODEL_NAME)
+
+    All subsequent compare_cad_shapes, generate_shape_space_map, and
+    create_similarity_index calls will use the chosen model.
+    Existing indexes are unaffected — they always use the model stored at creation time.
+
+    Returns {'model': '<active model>'}.
+
+    Example prompts:
+    - "SIGNALモデルに切り替えて。"
+    - "Switch to the 1M model for the next comparison."
+    """
+    import httpx
+    response = httpx.put(
+        f"{API_BASE}/similarity/settings",
+        params={"model": model},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
 def embed_cad_shape(cad_file_path: str = "", file_id: str = "", include_vector: bool = False) -> dict:
     """Compute the shape embedding vector for a single CAD part and return its metadata.
 
@@ -352,6 +393,10 @@ def compare_cad_shapes(
     - zip_file_path: path to a local ZIP containing CAD files (extracted server-side,
       max 50 files / 500 MB per ZIP); when specified alone, the server determines
       the file count so the 2-part minimum check is skipped
+
+    The embeddings model is taken from the server-wide setting (set_embedding_model).
+    Default is 'signal' (HOOPS AI SIGNAL model). Call set_embedding_model() first
+    to change it if needed.
 
     At least two parts are required in total across cad_file_paths and file_ids
     (unless zip_file_path is the sole input).
@@ -497,14 +542,19 @@ def create_similarity_index(name: str) -> dict:
 
     name: index name matching ^[a-z0-9_-]{1,64}$.  'default' is reserved.
 
-    Returns name, count (0), and dim (embedding dimension).
+    The embeddings model is taken from the server-wide setting (set_embedding_model).
+    Default is 'signal' (HOOPS AI SIGNAL model).  All parts added to this index will
+    use the same model automatically.
+
+    Returns name, count (0), dim (embedding dimension), and model.
 
     Raises an error if the name already exists (409) or is invalid (422).
 
     Typical workflow:
-      1. create_similarity_index("my-parts")
-      2. add_to_similarity_index("my-parts", cad_file_paths=[...])
-      3. search_similarity_index("my-parts", cad_file_path="query.step")
+      1. (optional) set_embedding_model("signal")  # already the default
+      2. create_similarity_index("my-parts")
+      3. add_to_similarity_index("my-parts", cad_file_paths=[...])
+      4. search_similarity_index("my-parts", cad_file_path="query.step")
     """
     response = _api_post(
         f"{API_BASE}/similarity/index/create",
@@ -526,6 +576,7 @@ def list_similarity_indexes() -> list:
     - count: number of registered parts (null if unreadable)
     - last_modified: UTC timestamp of last change
     - is_readonly: true only for the built-in 'default' index
+    - model: 'default' or 'signal' (null for the built-in 'default' index)
 
     Use this to check what indexes exist before calling other index tools.
     """
@@ -554,6 +605,9 @@ def add_to_similarity_index(
     - file_ids: list of existing file IDs from a previous upload_cad_model() call
     - zip_file_path: path to a ZIP archive containing CAD files (auto-extracted,
       max 50 files / 500 MB)
+
+    The embedder is always the one recorded in the index at creation time (model.json).
+    To change the model for future indexes use set_embedding_model() before creating them.
 
     Returns added (new parts), updated (overwritten parts), index_count (total after
     this call), and errors (per-file failures that did not abort the request).

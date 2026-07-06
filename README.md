@@ -134,16 +134,18 @@ Claude Desktop can call these 29 tools using natural language:
 | `get_similar_part_image` | Return the URL of the pre-generated PNG thumbnail for a part filename returned by `search_similar_shapes`. |
 | `get_similar_search_index_info` | Return metadata about the loaded FAISS index: status, entry count, embedding model name, vector dimension, file path, last-modified timestamp, and auxiliary metadata. Read-only. |
 | `embed_cad_shape` | Compute the shape embedding for a single CAD part (no FAISS index or training required). Returns `file_id`, `filename`, `dim`, `model_name`, `num_bodies`, and `cached`. Embeddings are cached server-side for fast repeated calls. |
-| `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP file in any combination. |
+| `get_embedding_settings` | Return the server-wide active embedding model (`'signal'` or `'default'`). Used by `compare_cad_shapes`, `generate_shape_space_map`, and `create_similarity_index`. |
+| `set_embedding_model` | Set the server-wide active embedding model: `'signal'` (HOOPS AI SIGNAL model, default) or `'default'` (1M model). Affects all subsequent compare/map/index-create calls. Existing indexes are unaffected. |
+| `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP file in any combination. Uses the server-wide active model (default: `'signal'`). |
 
 ### Named Similarity Index Management
 
 | Tool | Description |
 |---|---|
-| `create_similarity_index` | Create a new empty named index on the server. Persists across server restarts. Returns `name`, `count` (0), and `dim`. Raises 409 if the name already exists. |
-| `list_similarity_indexes` | List all similarity indexes including the built-in read-only `default` index. Each entry contains `name`, `count`, `last_modified`, and `is_readonly`. |
-| `add_to_similarity_index` | Register CAD parts in a named index. Accepts local paths, `file_id`s, and/or a ZIP in any combination. Returns `added`, `updated`, `index_count`, and `errors`. |
-| `search_similarity_index` | Search a named index for the top-k most similar parts to a query CAD file. Returns hits with `id`, `score`, `metadata`, and an `image_url` result-grid PNG. |
+| `create_similarity_index` | Create a new empty named index. The embeddings model is taken from the server-wide setting (`set_embedding_model`; default `'signal'`). Persists across server restarts. Returns `name`, `count` (0), `dim`, and `model`. Raises 409 if the name already exists. |
+| `list_similarity_indexes` | List all similarity indexes including the built-in read-only `default` index. Each entry contains `name`, `count`, `last_modified`, `is_readonly`, and `model`. |
+| `add_to_similarity_index` | Register CAD parts in a named index. Accepts local paths, `file_id`s, and/or a ZIP in any combination. The embedder is always the one recorded in the index at creation time (`model.json`). Returns `added`, `updated`, `index_count`, and `errors`. |
+| `search_similarity_index` | Search a named index for the top-k most similar parts to a query CAD file. The correct embedder is selected automatically based on the index model. Returns hits with `id`, `score`, `metadata`, and an `image_url` result-grid PNG. |
 | `remove_from_similarity_index` | Remove specific parts (by `file_id`) from a named index. Returns `removed` count and `index_count` remaining. |
 | `delete_similarity_index` | Permanently delete a named index and all its stored data. Irreversible. Raises 403 for the built-in `default` index. |
 
