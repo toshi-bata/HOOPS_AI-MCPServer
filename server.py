@@ -739,7 +739,7 @@ def delete_similarity_index(name: str) -> dict:
     return response.json()
 
 
-@mcp.tool()
+@mcp.tool(name="generate_shape_embedding_map")
 def generate_shape_space_map(
     cad_file_paths: list[str] | None = None,
     file_ids: list[str] | None = None,
@@ -800,7 +800,7 @@ def generate_shape_space_map(
     return {"job_id": job_id, "status": "processing"}
 
 
-@mcp.tool()
+@mcp.tool(name="get_shape_embedding_map_result")
 def get_shape_space_map_result(job_id: str) -> dict:
     """Check the status of a Shape Embeddings Map job started by generate_shape_space_map().
 
