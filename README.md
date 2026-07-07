@@ -99,7 +99,7 @@ Importing it gives Claude a consistent baseline for how to invoke the HOOPS AI t
 
 ## Available MCP Tools
 
-Claude Desktop can call these 30 tools using natural language:
+Claude Desktop can call these 32 tools using natural language:
 
 ### File Management
 
@@ -136,7 +136,7 @@ Claude Desktop can call these 30 tools using natural language:
 | `embed_cad_shape` | Compute the shape embedding for a single CAD part (no FAISS index or training required). Returns `file_id`, `filename`, `dim`, `model_name`, `num_bodies`, and `cached`. Embeddings are cached server-side for fast repeated calls. |
 | `get_embedding_settings` | Return the server-wide active embedding model (`'signal'` or `'default'`). Used by `compare_cad_shapes`, `generate_shape_space_map`, and `create_similarity_index`. |
 | `set_embedding_model` | Set the server-wide active embedding model: `'signal'` (HOOPS AI SIGNAL model, default) or `'default'` (1M model). Affects all subsequent compare/map/index-create calls. Existing indexes are unaffected. |
-| `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP file in any combination. Uses the server-wide active model (default: `'signal'`). |
+| `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP path. ZIP files are processed server-side (no large upload). Uses the server-wide active model (default: `'signal'`). |
 
 ### Named Similarity Index Management
 
@@ -144,7 +144,7 @@ Claude Desktop can call these 30 tools using natural language:
 |---|---|
 | `create_similarity_index` | Create a new empty named index. The embeddings model is taken from the server-wide setting (`set_embedding_model`; default `'signal'`). Persists across server restarts. Returns `name`, `count` (0), `dim`, and `model`. Raises 409 if the name already exists. |
 | `list_similarity_indexes` | List all similarity indexes including the built-in read-only `default` index. Each entry contains `name`, `count`, `last_modified`, `is_readonly`, and `model`. |
-| `add_to_similarity_index` | Register CAD parts in a named index. Accepts local paths, `file_id`s, and/or a ZIP in any combination. The embedder is always the one recorded in the index at creation time (`model.json`). Returns `added`, `updated`, `index_count`, and `errors`. |
+| `add_to_similarity_index` | Register CAD parts in a named index. Accepts local paths, `file_id`s, and/or a ZIP path. ZIP files are processed server-side (no large upload). The embedder is always the one recorded in the index at creation time (`model.json`). Returns `added`, `updated`, `index_count`, and `errors`. |
 | `search_similarity_index` | Search a named index for the top-k most similar parts to a query CAD file. The correct embedder is selected automatically based on the index model. Returns hits with `id`, `score`, `metadata`, and an `image_url` result-grid PNG. |
 | `remove_from_similarity_index` | Remove specific parts (by `file_id`) from a named index. Returns `removed` count and `index_count` remaining. |
 | `delete_similarity_index` | Permanently delete a named index and all its stored data. Irreversible. Raises 403 for the built-in `default` index. |
@@ -153,8 +153,8 @@ Claude Desktop can call these 30 tools using natural language:
 
 | Tool | Description |
 |---|---|
-| `generate_shape_space_map` | Generate a Shape Embeddings Map and **return the full result when complete** (blocks until done, up to 580 s). Accepts local paths, `file_id`s, and/or a ZIP. Returns `map_id`, `viewer_url`, per-part MDS `position`, similarity `matrix`, and MDS `stress` directly — no polling needed in normal use. |
-| `get_shape_space_map_result` | Fallback poll for a map job started by `generate_shape_space_map`. Only needed if `generate_shape_space_map` returned `status: "processing"` due to a server-side timeout. Returns `status` (`"processing"` / `"done"` / `"failed"`); when `"done"`, the full result is included. |
+| `generate_shape_space_map` | Generate a Shape Embeddings Map and **poll internally until complete (up to 30 min)**. Accepts local paths, `file_id`s, and/or a ZIP path. ZIP files are processed server-side. Returns `map_id`, `viewer_url`, per-part MDS `position`, similarity `matrix`, and MDS `stress` directly — no polling needed in normal use. |
+| `get_shape_space_map_result` | Fallback poll for a map job started by `generate_shape_space_map`. Only needed if `generate_shape_space_map` returned `status: "processing"` because the 30-minute deadline was exceeded. Returns `status` (`"processing"` / `"done"` / `"failed"`); when `"done"`, the full result is included. |
 | `query_shape_space_map` | Project a query CAD part onto an existing Shape Space Map (highlighted in magenta). Set `persist=true` to permanently add the query part to the original map. Returns `overlay_map_id`, `viewer_url`, and `nearest_parts`. |
 
 ### Part Classification
@@ -228,5 +228,15 @@ Generate a 3D shape space map for these parts: C:\temp\partA.stp, C:\temp\partB.
 ```
 
 ```
+ZIPに入っている全CADファイルの形状空間マップを生成して。ファイルは C:\temp\parts.zip
+```
+
+```
 Query the shape map <map_id> with C:\temp\new_part.step and show me the nearest parts.
 ```
+
+> **Note — ZIP file processing:** When a ZIP path is passed to `compare_cad_shapes`,
+> `add_to_similarity_index`, or `generate_shape_space_map`, the WebAPI server reads the file
+> directly from the given path.  This requires the MCP client and the WebAPI server to be on
+> the **same machine** (the default local setup).  For remote setups (WebAPI on a separate host),
+> use `upload_cad_model` to upload individual files first, then pass their `file_id`s.

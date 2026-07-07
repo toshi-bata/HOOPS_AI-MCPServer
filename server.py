@@ -62,6 +62,37 @@ def _upload_file(cad_file_path: str) -> str:
     return response.json()["file_id"]
 
 
+def _upload_zip_from_path(zip_file_path: str) -> list[str]:
+    """Register all CAD files inside a ZIP archive via the server-side upload-from-path
+    endpoint and return a list of file_ids.
+
+    The server reads the ZIP directly from the given path (absolute paths accepted),
+    extracts each recognised CAD file, and returns a file_id per entry.  This avoids
+    loading the entire ZIP into memory on the MCP client side and works even when the
+    file carries a Windows Zone Identifier mark that might trigger security dialogs in
+    GUI contexts.
+
+    Requires the WebAPI server to be able to access the path (i.e. the MCP client and
+    the WebAPI server run on the same host, which is the typical local-use scenario).
+    """
+    zip_path = Path(zip_file_path).expanduser().resolve()
+    if not zip_path.exists():
+        raise FileNotFoundError(f"ZIP file not found: {zip_path}")
+    response = _api_post(
+        f"{API_BASE}/files/upload-from-path",
+        params={"file_path": str(zip_path)},
+        timeout=300,
+    )
+    result = response.json()
+    file_ids = [entry["file_id"] for entry in result.get("files", [])]
+    if not file_ids and not result.get("errors"):
+        raise RuntimeError(
+            f"No CAD files found in ZIP: {zip_path}. "
+            "Ensure the archive contains files with supported extensions "
+            "(.step, .stp, .iges, .igs, .x_t, .x_b, .sat, .ipt, .prt, .sldprt, .catpart)."
+        )
+    return file_ids
+
 
 def _resolve_file_id(cad_file_path: str = "", file_id: str = "") -> str:
     """Return file_id: use existing one or upload the file if not yet uploaded."""
@@ -70,6 +101,7 @@ def _resolve_file_id(cad_file_path: str = "", file_id: str = "") -> str:
     if cad_file_path:
         return _upload_file(cad_file_path)
     raise ValueError("Either cad_file_path or file_id must be provided.")
+
 
 
 @mcp.tool()
@@ -420,28 +452,21 @@ def compare_cad_shapes(
     for path in (cad_file_paths or []):
         resolved_ids.append(_upload_file(path))
 
-    if not zip_file_path and len(resolved_ids) < 2:
+    if zip_file_path:
+        zip_ids = _upload_zip_from_path(zip_file_path)
+        resolved_ids.extend(zip_ids)
+
+    if len(resolved_ids) < 2:
         raise ValueError(
             "At least two parts are required for shape comparison. "
             "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
         )
 
-    params: dict = {}
-    if resolved_ids:
-        params["file_ids"] = ",".join(resolved_ids)
-
-    files: dict | None = None
-    if zip_file_path:
-        zip_path = Path(zip_file_path).expanduser().resolve()
-        if not zip_path.exists():
-            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        with zip_path.open("rb") as zf:
-            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
+    params: dict = {"file_ids": ",".join(resolved_ids)}
 
     response = _api_post(
         f"{API_BASE}/similarity/compare",
         params=params,
-        files=files,
         timeout=600,
     )
     return response.json()
@@ -617,19 +642,15 @@ def add_to_similarity_index(
     for path in (cad_file_paths or []):
         resolved_ids.append(_upload_file(path))
 
+    if zip_file_path:
+        zip_ids = _upload_zip_from_path(zip_file_path)
+        resolved_ids.extend(zip_ids)
+
     params: dict = {"name": name}
     if resolved_ids:
         params["file_ids"] = ",".join(resolved_ids)
 
-    files: dict | None = None
-    if zip_file_path:
-        zip_path = Path(zip_file_path).expanduser().resolve()
-        if not zip_path.exists():
-            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        with zip_path.open("rb") as zf:
-            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
-
-    if not resolved_ids and not zip_file_path:
+    if not resolved_ids:
         raise ValueError(
             "At least one input is required: cad_file_paths, file_ids, or zip_file_path."
         )
@@ -637,7 +658,6 @@ def add_to_similarity_index(
     response = _api_post(
         f"{API_BASE}/similarity/index/add",
         params=params,
-        files=files,
         timeout=600,
     )
     return response.json()
@@ -762,46 +782,53 @@ def generate_shape_space_map(
     for path in (cad_file_paths or []):
         resolved_ids.append(_upload_file(path))
 
-    if not zip_file_path and len(resolved_ids) < 2:
+    if zip_file_path:
+        zip_ids = _upload_zip_from_path(zip_file_path)
+        resolved_ids.extend(zip_ids)
+
+    if len(resolved_ids) < 2:
         raise ValueError(
             "At least two parts are required for shape space map. "
             "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
         )
 
-    params: dict = {"sync": "true", "timeout": "580"}
-    if resolved_ids:
-        params["file_ids"] = ",".join(resolved_ids)
-
-    files: dict | None = None
-    if zip_file_path:
-        zip_path = Path(zip_file_path).expanduser().resolve()
-        if not zip_path.exists():
-            raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-        with zip_path.open("rb") as zf:
-            files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
-
+    # Submit the job in async mode to avoid a single long-lived HTTP connection that
+    # can time out on the client side when processing many parts for the first time.
     response = _api_post(
         f"{API_BASE}/similarity/map",
-        params=params,
-        files=files,
-        timeout=600,
+        params={"file_ids": ",".join(resolved_ids)},
+        timeout=60,
     )
     job = response.json()
-    if not job.get("job_id"):
+    job_id = job.get("job_id")
+    if not job_id:
         raise RuntimeError(f"Unexpected response from /similarity/map: {job}")
-    return job
+
+    # Poll until done, failed, or a generous 30-minute deadline.
+    _POLL_INTERVAL = 5   # seconds between polls
+    _DEADLINE = 1800     # 30 minutes total
+    deadline = time.time() + _DEADLINE
+    while time.time() < deadline:
+        time.sleep(_POLL_INTERVAL)
+        status_resp = _api_get(f"{API_BASE}/similarity/map/job/{job_id}", timeout=30)
+        status = status_resp.json()
+        if status.get("status") in ("done", "failed"):
+            return status
+
+    # Deadline exceeded — return current status so the caller can poll manually.
+    return status
 
 
 @mcp.tool()
 def get_shape_space_map_result(job_id: str) -> dict:
     """Check the status of a Shape Embeddings Map job started by generate_shape_space_map().
 
-    Normally you do NOT need to call this tool — generate_shape_space_map() blocks
-    until the map is ready and returns the full result directly.
+    Normally you do NOT need to call this tool — generate_shape_space_map() polls
+    internally until the map is ready and returns the full result directly.
 
     Only call this tool if generate_shape_space_map() returned status "processing"
-    (which means the 580 s server-side timeout was reached before completion).
-    In that case, call this tool periodically until status changes to "done" or "failed".
+    (which means the 30-minute deadline was exceeded before completion).
+    In that case, call this tool once the computation has had more time to finish.
 
     Response fields:
     - job_id: the job identifier
