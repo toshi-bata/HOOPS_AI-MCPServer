@@ -725,11 +725,13 @@ def generate_shape_space_map(
     file_ids: list[str] | None = None,
     zip_file_path: str = "",
 ) -> dict:
-    """Generate a 3D Shape Space Map that visualizes similarity relationships between CAD parts.
+    """Start a Shape Embeddings Map computation job and return immediately.
 
-    Parts are positioned in 3D space using classical Multidimensional Scaling (MDS)
-    so that similar parts appear close together and dissimilar parts appear far apart.
-    Similar parts naturally form visible clusters in the viewer.
+    Because embedding and MDS computation can take several minutes, this tool
+    starts the job in the background and returns a job_id right away.
+    After calling this tool, ALWAYS call get_shape_space_map_result(job_id)
+    to check progress.  If the status is still "processing", wait a moment and
+    call get_shape_space_map_result again — repeat until status is "done" or "failed".
 
     Inputs can be combined freely:
     - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
@@ -740,14 +742,8 @@ def generate_shape_space_map(
     At least two parts are required (unless zip_file_path is the sole input).
 
     Response fields:
-    - map_id: unique ID for this map session
-    - viewer_url: URL to open the interactive 3D viewer in a browser
-    - count: number of parts processed
-    - parts: list of {index, file_id, filename, scs_url, position} where position is
-      the MDS-derived [x, y, z] coordinate (unit scale; viewer slider controls spacing)
-    - matrix: N×N cosine-similarity matrix ordered by parts[].index
-    - stress: MDS residual (0.0 = exact placement, >0 = approximate; N>=5 is always approximate)
-    - errors: per-file failures, if any
+    - job_id: pass this to get_shape_space_map_result() to retrieve the result
+    - status: always "processing" immediately after this call
 
     Example natural-language prompts:
     - "この5つのSTEPファイルの形状空間マップを生成して"
@@ -777,7 +773,6 @@ def generate_shape_space_map(
         with zip_path.open("rb") as zf:
             files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
 
-    # POST returns 202 immediately with a job_id — the map computation runs in the background.
     response = _api_post(
         f"{API_BASE}/similarity/map",
         params=params,
@@ -785,24 +780,38 @@ def generate_shape_space_map(
         timeout=60,
     )
     job = response.json()
-    job_id = job.get("job_id")
-    if not job_id:
+    if not job.get("job_id"):
         raise RuntimeError(f"Unexpected response from /similarity/map: {job}")
+    return job
 
-    # Poll until the job completes (max 10 minutes, 5-second intervals).
-    poll_url = f"{API_BASE}/similarity/map/job/{job_id}"
-    deadline = time.monotonic() + 600
-    while True:
-        poll = _api_get(poll_url, timeout=30)
-        status_body = poll.json()
-        status = status_body.get("status")
-        if status == "done":
-            return status_body.get("result", status_body)
-        if status == "failed":
-            raise RuntimeError(f"Shape map job failed: {status_body.get('error', 'unknown error')}")
-        if time.monotonic() > deadline:
-            raise RuntimeError(f"Shape map job '{job_id}' timed out after 10 minutes.")
-        time.sleep(5)
+
+@mcp.tool()
+def get_shape_space_map_result(job_id: str) -> dict:
+    """Check the status of a Shape Embeddings Map job started by generate_shape_space_map().
+
+    Call this after generate_shape_space_map() returns a job_id.
+    If status is "processing", the computation is still running — call this tool
+    again after a short wait.  When status is "done", the full map result is
+    returned in the "result" field.
+
+    Response fields:
+    - job_id: the job identifier
+    - status: "processing" | "done" | "failed"
+    - error: error message when status is "failed"
+    - result (when done):
+      - map_id: unique ID for this map session
+      - viewer_url: URL to open the interactive 3D viewer in a browser
+      - count: number of parts processed
+      - parts: list of {index, file_id, filename, scs_url, position}
+      - matrix: N×N cosine-similarity matrix
+      - stress: MDS residual stress value
+      - errors: per-file non-fatal failures, if any
+    """
+    response = _api_get(
+        f"{API_BASE}/similarity/map/job/{job_id}",
+        timeout=30,
+    )
+    return response.json()
 
 
 @mcp.tool()
