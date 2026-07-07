@@ -1,5 +1,6 @@
 import httpx
 import os
+import time
 import uuid
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
@@ -776,13 +777,32 @@ def generate_shape_space_map(
         with zip_path.open("rb") as zf:
             files = {"zip_file": (zip_path.name, zf.read(), "application/zip")}
 
+    # POST returns 202 immediately with a job_id — the map computation runs in the background.
     response = _api_post(
         f"{API_BASE}/similarity/map",
         params=params,
         files=files,
-        timeout=600,
+        timeout=60,
     )
-    return response.json()
+    job = response.json()
+    job_id = job.get("job_id")
+    if not job_id:
+        raise RuntimeError(f"Unexpected response from /similarity/map: {job}")
+
+    # Poll until the job completes (max 10 minutes, 5-second intervals).
+    poll_url = f"{API_BASE}/similarity/map/job/{job_id}"
+    deadline = time.monotonic() + 600
+    while True:
+        poll = _api_get(poll_url, timeout=30)
+        status_body = poll.json()
+        status = status_body.get("status")
+        if status == "done":
+            return status_body.get("result", status_body)
+        if status == "failed":
+            raise RuntimeError(f"Shape map job failed: {status_body.get('error', 'unknown error')}")
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Shape map job '{job_id}' timed out after 10 minutes.")
+        time.sleep(5)
 
 
 @mcp.tool()

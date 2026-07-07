@@ -153,7 +153,7 @@ Claude Desktop can call these 29 tools using natural language:
 
 | Tool | Description |
 |---|---|
-| `generate_shape_space_map` | Generate a 3D Shape Space Map using MDS so that similar parts cluster together. Accepts local paths, `file_id`s, and/or a ZIP. Returns `map_id`, `viewer_url`, per-part MDS `position`, similarity `matrix`, and MDS `stress`. |
+| `generate_shape_space_map` | Generate a 3D Shape Space Map using MDS so that similar parts cluster together. Accepts local paths, `file_id`s, and/or a ZIP. The computation runs asynchronously on the server — the tool polls automatically and returns once complete. Returns `map_id`, `viewer_url`, per-part MDS `position`, similarity `matrix`, and MDS `stress`. |
 | `query_shape_space_map` | Project a query CAD part onto an existing Shape Space Map (highlighted in magenta). Set `persist=true` to permanently add the query part to the original map. Returns `overlay_map_id`, `viewer_url`, and `nearest_parts`. |
 
 ### Part Classification
