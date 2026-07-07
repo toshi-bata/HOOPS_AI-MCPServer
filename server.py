@@ -725,13 +725,13 @@ def generate_shape_space_map(
     file_ids: list[str] | None = None,
     zip_file_path: str = "",
 ) -> dict:
-    """Start a Shape Embeddings Map computation job and return immediately.
+    """Generate a Shape Embeddings Map and return the full result when complete.
 
-    Because embedding and MDS computation can take several minutes, this tool
-    starts the job in the background and returns a job_id right away.
-    After calling this tool, ALWAYS call get_shape_space_map_result(job_id)
-    to check progress.  If the status is still "processing", wait a moment and
-    call get_shape_space_map_result again — repeat until status is "done" or "failed".
+    This tool blocks until the computation finishes (up to 580 seconds) and returns
+    the complete map result in a single call — no polling required.
+    In the rare case of a server-side timeout the response will contain
+    status "processing" and a job_id; only then call get_shape_space_map_result(job_id)
+    to retrieve the result once it finishes.
 
     Inputs can be combined freely:
     - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
@@ -741,9 +741,16 @@ def generate_shape_space_map(
 
     At least two parts are required (unless zip_file_path is the sole input).
 
-    Response fields:
-    - job_id: pass this to get_shape_space_map_result() to retrieve the result
-    - status: always "processing" immediately after this call
+    Response fields (when status is "done"):
+    - job_id: unique job identifier
+    - status: "done" | "failed" (or "processing" on timeout — see above)
+    - result.map_id: pass to query_shape_space_map() to overlay a query part
+    - result.viewer_url: open in a browser to see the interactive 3D map
+    - result.count: number of parts placed in the map
+    - result.parts: per-part metadata with MDS position
+    - result.matrix: N×N cosine-similarity matrix
+    - result.stress: Kruskal stress-1 layout accuracy (< 0.01 = exact)
+    - result.errors: per-file non-fatal failures, if any
 
     Example natural-language prompts:
     - "この5つのSTEPファイルの形状空間マップを生成して"
@@ -761,7 +768,7 @@ def generate_shape_space_map(
             "Provide two or more entries via cad_file_paths, file_ids, or a zip_file_path."
         )
 
-    params: dict = {}
+    params: dict = {"sync": "true", "timeout": "580"}
     if resolved_ids:
         params["file_ids"] = ",".join(resolved_ids)
 
@@ -777,7 +784,7 @@ def generate_shape_space_map(
         f"{API_BASE}/similarity/map",
         params=params,
         files=files,
-        timeout=60,
+        timeout=600,
     )
     job = response.json()
     if not job.get("job_id"):
@@ -789,10 +796,12 @@ def generate_shape_space_map(
 def get_shape_space_map_result(job_id: str) -> dict:
     """Check the status of a Shape Embeddings Map job started by generate_shape_space_map().
 
-    Call this after generate_shape_space_map() returns a job_id.
-    If status is "processing", the computation is still running — call this tool
-    again after a short wait.  When status is "done", the full map result is
-    returned in the "result" field.
+    Normally you do NOT need to call this tool — generate_shape_space_map() blocks
+    until the map is ready and returns the full result directly.
+
+    Only call this tool if generate_shape_space_map() returned status "processing"
+    (which means the 580 s server-side timeout was reached before completion).
+    In that case, call this tool periodically until status changes to "done" or "failed".
 
     Response fields:
     - job_id: the job identifier
