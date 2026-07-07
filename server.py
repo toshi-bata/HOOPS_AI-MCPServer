@@ -745,13 +745,12 @@ def generate_shape_space_map(
     file_ids: list[str] | None = None,
     zip_file_path: str = "",
 ) -> dict:
-    """Generate a Shape Embeddings Map and return the full result when complete.
+    """Start a Shape Embeddings Map job and return immediately with the job_id.
 
-    This tool blocks until the computation finishes (up to 580 seconds) and returns
-    the complete map result in a single call — no polling required.
-    In the rare case of a server-side timeout the response will contain
-    status "processing" and a job_id; only then call get_shape_space_map_result(job_id)
-    to retrieve the result once it finishes.
+    This tool submits the job and returns right away with status "processing" and a
+    job_id — it does NOT wait for the job to finish.
+    After calling this tool, repeatedly call get_shape_space_map_result(job_id) every
+    10–15 seconds until status changes to "done" or "failed".
 
     Inputs can be combined freely:
     - cad_file_paths: list of local CAD file paths (each is uploaded automatically)
@@ -761,16 +760,9 @@ def generate_shape_space_map(
 
     At least two parts are required (unless zip_file_path is the sole input).
 
-    Response fields (when status is "done"):
-    - job_id: unique job identifier
-    - status: "done" | "failed" (or "processing" on timeout — see above)
-    - result.map_id: pass to query_shape_space_map() to overlay a query part
-    - result.viewer_url: open in a browser to see the interactive 3D map
-    - result.count: number of parts placed in the map
-    - result.parts: per-part metadata with MDS position
-    - result.matrix: N×N cosine-similarity matrix
-    - result.stress: Kruskal stress-1 layout accuracy (< 0.01 = exact)
-    - result.errors: per-file non-fatal failures, if any
+    Response fields:
+    - job_id: unique job identifier — pass to get_shape_space_map_result()
+    - status: always "processing" immediately after submission
 
     Example natural-language prompts:
     - "この5つのSTEPファイルの形状空間マップを生成して"
@@ -804,31 +796,16 @@ def generate_shape_space_map(
     if not job_id:
         raise RuntimeError(f"Unexpected response from /similarity/map: {job}")
 
-    # Poll until done, failed, or a generous 30-minute deadline.
-    _POLL_INTERVAL = 5   # seconds between polls
-    _DEADLINE = 1800     # 30 minutes total
-    deadline = time.time() + _DEADLINE
-    while time.time() < deadline:
-        time.sleep(_POLL_INTERVAL)
-        status_resp = _api_get(f"{API_BASE}/similarity/map/job/{job_id}", timeout=30)
-        status = status_resp.json()
-        if status.get("status") in ("done", "failed"):
-            return status
-
-    # Deadline exceeded — return current status so the caller can poll manually.
-    return status
+    # Return immediately — let the caller (Claude) poll via get_shape_space_map_result().
+    return {"job_id": job_id, "status": "processing"}
 
 
 @mcp.tool()
 def get_shape_space_map_result(job_id: str) -> dict:
     """Check the status of a Shape Embeddings Map job started by generate_shape_space_map().
 
-    Normally you do NOT need to call this tool — generate_shape_space_map() polls
-    internally until the map is ready and returns the full result directly.
-
-    Only call this tool if generate_shape_space_map() returned status "processing"
-    (which means the 30-minute deadline was exceeded before completion).
-    In that case, call this tool once the computation has had more time to finish.
+    Call this tool repeatedly (every 10–15 seconds) after generate_shape_space_map()
+    returns status "processing", until status changes to "done" or "failed".
 
     Response fields:
     - job_id: the job identifier
