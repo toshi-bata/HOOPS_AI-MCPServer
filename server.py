@@ -870,6 +870,79 @@ def query_shape_space_map(
     return response.json()
 
 
+# ── Context Layer (Missing Metadata Prediction) ──
+
+@mcp.tool()
+def predict_context(
+    hits: list[dict],
+    contexts: dict[str, dict],
+    keys: list[str],
+    numeric_keys: list[str] | None = None,
+    query_context: dict | None = None,
+    default_categorical_rule: dict | None = None,
+    per_key_rules: dict | None = None,
+    status_policy: dict | None = None,
+) -> dict:
+    """Predict missing metadata values for a query CAD part based on similar parts' history.
+
+    This is Step 3 of a 3-step workflow:
+      (a) Call search_similar_shapes() to obtain hits — a list of {id, score} entries
+          for the most similar parts already in the database.
+      (b) Using a PLM/ERP MCP tool (e.g. context_by_cad_files), look up the raw
+          metadata records for each hit by its id (CAD filename), building the
+          contexts dict: {id: {metadata key: value, ...}, ...}.
+      (c) Pass hits and contexts to this tool to predict the metadata values
+          specified in keys.
+
+    Parameters:
+    - hits: list of {"id": str, "score": float} — directly from search_similar_shapes()
+    - contexts: dict mapping each hit id (CAD filename) to its raw metadata dict.
+      Keys must exactly match the id values in hits.
+    - keys: metadata keys to predict (e.g. ["Material", "Cost", "LeadTime"])
+    - numeric_keys: subset of keys to treat as numeric values (e.g. ["Cost", "LeadTime"]).
+      Any key in keys that holds numeric data must also appear here; default is [].
+    - query_context: values already known for the query part (e.g. {"Material": "SUS304"}).
+      Known values are used to narrow predictions; default is {}.
+    - default_categorical_rule: default inference rule applied to categorical keys not
+      covered by per_key_rules; default {"temperature": 12.0, "min_margin": 0.05}.
+    - per_key_rules: per-key rule overrides. Each entry is one of:
+        {"type": "numeric_weighted", "log_scale": bool, "auto_relevance_weight": bool,
+         "nearest_neighbor_threshold": float|null, "score_temperature": float|null}
+        {"type": "nearest_neighbor", "threshold": float}
+    - status_policy: thresholds for the "ready_to_propose" / "needs_review" /
+      "insufficient_evidence" status labels; omit to use the server defaults.
+
+    Response: {"predictions": {"<key>": {"value": ..., "confidence": float,
+      "status": "ready_to_propose"|"needs_review"|"insufficient_evidence",
+      "injected_context": dict|null}, ...}}
+
+    Errors (all raised as RuntimeError):
+    - 422: invalid rule type or malformed request body
+    - 503: context layer module unavailable (other tools are unaffected)
+    - 500: unexpected server error
+
+    Example natural-language prompts:
+    - "この部品の材料とコストを、似ている部品の実績から予測して"
+    - "Predict the missing material and cost for this part based on similar parts' history."
+    """
+    payload: dict = {
+        "hits": hits,
+        "contexts": contexts,
+        "keys": keys,
+        "numeric_keys": numeric_keys if numeric_keys is not None else [],
+        "query_context": query_context if query_context is not None else {},
+        "default_categorical_rule": (
+            default_categorical_rule
+            if default_categorical_rule is not None
+            else {"temperature": 12.0, "min_margin": 0.05}
+        ),
+        "per_key_rules": per_key_rules if per_key_rules is not None else {},
+    }
+    if status_policy is not None:
+        payload["status_policy"] = status_policy
+    response = _api_post(f"{API_BASE}/context/predict", json=payload, timeout=120)
+    return response.json()
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

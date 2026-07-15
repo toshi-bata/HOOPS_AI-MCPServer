@@ -99,7 +99,7 @@ Importing it gives Claude a consistent baseline for how to invoke the HOOPS AI t
 
 ## Available MCP Tools
 
-Claude Desktop can call these 32 tools using natural language:
+Claude Desktop can call these 33 tools using natural language:
 
 ### File Management
 
@@ -168,6 +168,12 @@ Claude Desktop can call these 32 tools using natural language:
 | `get_part_classification_files` | Return the list of file IDs in the dataset that belong to a given part class (`label_id` 0–44). |
 | `get_part_classification_preview` | Return a URL to a PNG thumbnail grid for a given part class (`label_id`, `k`, `grid_cols`). |
 
+### Context Layer (Missing Metadata Prediction)
+
+| Tool | Description |
+|---|---|
+| `predict_context` | Predict missing metadata (material, cost, lead time, etc.) for a query CAD part using similar parts' history. Step 3 of a 3-step workflow: (a) `search_similar_shapes` → hits, (b) PLM/ERP tool → contexts, (c) this tool → predictions. Returns `predictions` with `value`, `confidence`, and `status` per key. |
+
 ---
 
 ## Example Usage in Claude Desktop
@@ -180,6 +186,14 @@ What HOOPS AI tools are available?
 
 ```
 "C:\temp\helloworld.stp" — please display this 3D CAD file.
+```
+
+```
+この部品の材料とコストを、似ている部品の実績から予測して
+```
+
+```
+Predict the missing material and cost for this part based on similar parts' history.
 ```
 
 ```
