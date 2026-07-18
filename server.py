@@ -257,10 +257,16 @@ def get_brep_adjacency_graph(cad_file_path: str = "", file_id: str = "") -> dict
 
 @mcp.tool()
 def get_brep_attributes(cad_file_path: str = "", file_id: str = "") -> dict:
-    """Extract face and edge attributes from the B-rep model of a CAD file.
+    """Extract raw face and edge attributes from the B-rep model of a CAD file.
 
-    Use this tool whenever the user asks to "show", "display", "get", or "give"
-    B-Rep or model information — without explicitly requesting to open a viewer.
+    Use this tool for questions about individual faces/edges — e.g. "which face
+    is the largest", "sort edges by dihedral angle", "list face areas" — where the
+    per-entry values (not just counts) are needed.
+
+    Do NOT use this tool to answer counting questions such as "how many faces",
+    "how many faces of each type", or "how many faces and edges in total" — the
+    response can contain several hundred raw entries, which is unreliable to tally
+    by hand. Use get_brep_type_counts for those instead.
 
     Provide either:
     - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
@@ -273,6 +279,33 @@ def get_brep_attributes(cad_file_path: str = "", file_id: str = "") -> dict:
     fid = _resolve_file_id(cad_file_path, file_id)
     response = _api_post(
         f"{API_BASE}/BRep/attributes",
+        params={"file_id": fid},
+        timeout=120,
+    )
+    return response.json()
+
+
+@mcp.tool()
+def get_brep_type_counts(cad_file_path: str = "", file_id: str = "") -> dict:
+    """Return face and edge counts of a CAD file's B-rep model, grouped by type.
+
+    ALWAYS use this tool — instead of get_brep_attributes — for any question about
+    counts: "how many faces", "how many faces of type X", "how many edges", "how
+    many faces and edges in total", "break down faces/edges by type", etc. The
+    counts are aggregated server-side, so they are exact and reproducible, unlike
+    tallying a raw per-face/per-edge array by hand.
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
+    - cad_file_path: local path to the CAD file (will be uploaded automatically)
+
+    Returns:
+    - faces: {total, by_type: {type_name: count, ...}}
+    - edges: {total, by_type: {type_name: count, ...}}
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/BRep/type-counts",
         params={"file_id": fid},
         timeout=120,
     )

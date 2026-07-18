@@ -114,7 +114,8 @@ Claude Desktop can call these 33 tools using natural language:
 | Tool | Description |
 |---|---|
 | `get_brep_adjacency_graph` | Build a face adjacency graph from a CAD file. Returns graph data (nodes, edges, counts) and `image_url` (PNG visualization URL). |
-| `get_brep_attributes` | Extract face and edge attributes (types, areas, lengths, dihedral angles, etc.) from a CAD file. |
+| `get_brep_attributes` | Extract raw per-face and per-edge attributes (types, areas, lengths, dihedral angles, etc.) from a CAD file. For individual-entry questions, not counting. |
+| `get_brep_type_counts` | Return face and edge counts grouped by type, aggregated server-side. Use for any counting question ("how many faces", "faces by type", totals). |
 
 ### Manufacturing Feature Recognition (MFR)
 
