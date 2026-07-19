@@ -153,14 +153,6 @@ What HOOPS AI tools are available?
 ```
 
 ```
-この部品の材料とコストを、似ている部品の実績から予測して
-```
-
-```
-Predict the missing material and cost for this part based on similar parts' history.
-```
-
-```
 "C:\temp\Flange287.stp" — show this model and give me its B-Rep information.
 ```
 
@@ -173,7 +165,7 @@ Predict the missing material and cost for this part based on similar parts' hist
 ```
 
 ```
-この2つのSTEPファイルはどれくらい似ている？ C:\temp\partA.stp と C:\temp\partB.stp
+How similar are these two STEP files? C:\temp\partA.stp and C:\temp\partB.stp
 ```
 
 ```
@@ -182,7 +174,7 @@ C:\temp\bracket_v1.step, C:\temp\bracket_v2.step, C:\temp\bracket_v3.step
 ```
 
 ```
-ZIPに入っているCADファイルの類似度マトリクスを出して。ファイルは C:\temp\parts.zip
+Show me the similarity matrix for the CAD files in this ZIP: C:\temp\parts.zip
 ```
 
 ```
@@ -194,3 +186,13 @@ Compute the shape embedding for C:\temp\flange.stp and tell me the embedding dim
 > client and the WebAPI server to be on the **same machine** (the default local setup).
 > For remote setups (WebAPI on a separate host), use `upload_cad_model` to upload
 > individual files first, then pass their `file_id`s.
+
+---
+
+## License
+
+This MCP server's source code is released under the [MIT License](LICENSE).
+
+Using it requires a working HOOPS AI WebAPI server, which depends on the HOOPS AI SDK
+and a valid `HOOPS_AI_LICENSE` key — those are licensed separately by Tech Soft 3D and
+are **not** covered by this repository's MIT License.
