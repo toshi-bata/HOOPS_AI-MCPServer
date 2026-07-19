@@ -99,7 +99,7 @@ Importing it gives Claude a consistent baseline for how to invoke the HOOPS AI t
 
 ## Available MCP Tools
 
-Claude Desktop can call these 16 tools using natural language.
+Claude Desktop can call these 17 tools using natural language.
 
 > **Note:** Tools that mutate server state (named similarity indexes, embedding-model
 > switching) or run long-running jobs (Shape Space Map) live in a separate, private
@@ -136,6 +136,7 @@ Claude Desktop can call these 16 tools using natural language.
 | `search_similar_shapes` | Find the top-k most similar parts using HOOPS Embeddings and a FAISS index. Returns match IDs, similarity scores, and `image_url`. |
 | `get_similar_part_image` | Return the URL of the pre-generated PNG thumbnail for a part filename returned by `search_similar_shapes`. |
 | `get_similar_search_index_info` | Return metadata about the loaded FAISS index: status, entry count, embedding model name, vector dimension, file path, last-modified timestamp, and auxiliary metadata. Read-only. |
+| `search_similarity_index` | Search a named similarity index (created/managed via the private demo MCP server) for the top-k most similar parts to a query CAD file. Returns hits with `id`, `score`, `metadata`, and an `image_url` result-grid PNG. |
 | `embed_cad_shape` | Compute the shape embedding for a single CAD part (no FAISS index or training required). Returns `file_id`, `filename`, `dim`, `model_name`, `num_bodies`, and `cached`. Embeddings are cached server-side for fast repeated calls. |
 | `compare_cad_shapes` | Compute pairwise cosine-similarity scores for 2+ CAD parts (no FAISS index or training required). Returns an N×N similarity matrix, a ranked pair list, and per-file error details. Accepts local paths, existing `file_id`s, and/or a ZIP path. ZIP files are processed server-side (no large upload). Uses the server-wide active embedding model. |
 

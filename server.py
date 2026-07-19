@@ -329,6 +329,42 @@ def get_similar_search_index_info() -> dict:
 
 
 @mcp.tool()
+def search_similarity_index(
+    name: str,
+    cad_file_path: str = "",
+    file_id: str = "",
+    top_k: int = 10,
+) -> dict:
+    """Search a named similarity index for the most similar parts to a query shape.
+
+    Returns an empty hits list (not an error) when the index contains zero entries.
+    When hits are found, image_url points to a result-grid PNG showing the query
+    part and the top-k matches with their similarity scores.
+
+    name: index name to search (the index must already exist on the server — index
+    creation/management tools are provided by the private demo MCP server).
+
+    Provide either:
+    - file_id: ID from a previous upload_cad_model() call (recommended)
+    - cad_file_path: local path to the CAD file (uploaded automatically)
+
+    Each hit contains:
+    - id: file_id of the registered part
+    - score: cosine similarity (1.0 = identical, higher = more similar)
+    - metadata: filename, registered_at timestamp
+
+    Also returns image_url: a URL to a PNG result-grid image.
+    """
+    fid = _resolve_file_id(cad_file_path, file_id)
+    response = _api_post(
+        f"{API_BASE}/similarity/index/{name}/search",
+        params={"file_id": fid, "top_k": top_k},
+        timeout=300,
+    )
+    return response.json()
+
+
+@mcp.tool()
 def embed_cad_shape(cad_file_path: str = "", file_id: str = "", include_vector: bool = False) -> dict:
     """Compute the shape embedding vector for a single CAD part and return its metadata.
 
