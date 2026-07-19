@@ -84,17 +84,6 @@ Claude Desktop passes this value to the MCP server process automatically:
 
 4. Save the file and **restart Claude Desktop**.
 
-### (Optional) Import the Skill file
-
-The `skills/` folder contains a `.skill` file that defines the expected behaviors and best-practice instructions for using this MCP server with Claude Desktop.  
-Importing it gives Claude a consistent baseline for how to invoke the HOOPS AI tools — you can then customize the skill to match your own workflow.
-
-**How to import:**
-
-1. In Claude Desktop, go to **Settings** → **Skills**
-2. Click **Import Skill** and select `skills/hoops-ai-tool-tips.skill` from this repository
-3. Review and edit the skill content as needed for your use case
-
 ---
 
 ## Available MCP Tools
@@ -127,7 +116,7 @@ Claude Desktop can call these 17 tools using natural language.
 
 | Tool | Description |
 |---|---|
-| `run_MFR_inference` | Run MFR inference on a CAD file. Returns predictions, probabilities, `viewer_url`, and `image_url`. |
+| `run_MFR_inference` | Run MFR inference on a CAD file. Returns predictions, probabilities, and `viewer_url` (no `image_url` — colorized results are only visible in the live viewer). |
 
 ### Shape Similarity Search
 

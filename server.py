@@ -170,8 +170,11 @@ def run_MFR_inference(cad_file_path: str = "", file_id: str = "") -> dict:
     - file_id: ID from a previous upload_cad_model() call (recommended, avoids re-upload)
     - cad_file_path: local path to the CAD file (will be uploaded automatically)
 
-    Returns predictions, probabilities, viewer_url, image_url, and color_map.
+    Returns predictions, probabilities, viewer_url, and color_map.
     color_map contains only the labels present in the model: {label_id: {name, color_rgb}}.
+    No image_url/PNG preview is returned: the face colors reflecting the predictions
+    are applied to the live viewer only, not to a static snapshot, so open viewer_url
+    to see the colorized result.
     """
     fid = _resolve_file_id(cad_file_path, file_id)
     response = _api_post(
