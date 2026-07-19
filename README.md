@@ -32,13 +32,21 @@ See the root [README](../README.md) for an overview of the full platform.
         "--directory",
         "C:\\path\\to\\HOOPS_AI-MCP\\mcp_server",
         "server.py"
-      ]
+      ],
+      "env": {
+        "HOOPS_WEBAPI_URL": "http://127.0.0.1:8000"
+      }
     }
   }
 }
 ```
 
 > Replace `C:\\path\\to\\HOOPS_AI-MCP` with the actual path where you cloned this repository.
+
+`HOOPS_WEBAPI_URL` tells the MCP server where the WebAPI server is running:
+
+- **Same machine (default):** leave it as `http://127.0.0.1:8000` (or omit the whole `env` block — this is the built-in default). Use this when the WebAPI server runs on the same PC as Claude Desktop.
+- **Different machine (client-server setup):** change it to the WebAPI machine's actual address, e.g. `"http://192.168.0.6:8000"`. No system environment variable is needed — Claude Desktop passes this value to the MCP server process automatically. This is the **only configuration change needed** on the client machine.
 
 > **Troubleshooting — `uv` not found:** Claude Desktop launches with a limited PATH and may fail to find `uv` even if it works in your terminal.  
 > If the MCP server does not appear in Claude Desktop, use the **full path** to `uv.exe` instead of `"uv"`:
@@ -49,38 +57,6 @@ See the root [README](../README.md) for an overview of the full platform.
 > ```json
 > "command": "C:\\Users\\<you>\\.local\\bin\\uv.exe"
 > ```
-
-**Same machine (default):**
-
-No additional configuration is needed.  
-The MCP server defaults to `http://127.0.0.1:8000`, so if the WebAPI server is running on the same machine, the basic config above works as-is.
-
-**When the WebAPI server is on a different machine (client-server setup):**
-
-Add `"env": {"HOOPS_WEBAPI_URL": "..."}` to the config — no system environment variable is needed.  
-Claude Desktop passes this value to the MCP server process automatically:
-
-```json
-{
-  "mcpServers": {
-    "hoops-ai": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "C:\\path\\to\\HOOPS_AI-MCP\\mcp_server",
-        "server.py"
-      ],
-      "env": {
-        "HOOPS_WEBAPI_URL": "http://192.168.0.6:8000"
-      }
-    }
-  }
-}
-```
-
-> Replace `192.168.0.6` with the actual IP address of the machine running the WebAPI server.  
-> This is the **only configuration change needed** on the client machine.
 
 4. Save the file and **restart Claude Desktop**.
 
